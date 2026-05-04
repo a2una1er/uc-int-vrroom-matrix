@@ -1,0 +1,34 @@
+{
+  "driver_id": "uc_vrroom_driver",
+  "version": "0.1.0",
+  "min_core_api": "0.20.0",
+  "name": {
+    "en": "HDFury VRRoom",
+    "de": "HDFury VRRoom"
+  },
+  "icon": "custom:vrroom",
+  "description": {
+    "en": "HDFury VRRoom HDMI Matrix Switch integration for Remote Three",
+    "de": "HDFury VRRoom HDMI-Matrix-Switch Integration für Remote Three"
+  },
+  "setup_data_schema": {
+    "title": {
+      "en": "VRRoom Configuration",
+      "de": "VRRoom Konfiguration"
+    },
+    "settings": [
+      {
+        "id": "host",
+        "label": {
+          "en": "VRRoom Hostname or IP",
+          "de": "VRRoom Hostname oder IP-Adresse"
+        },
+        "field": {
+          "text": {
+            "value": "vrroom"
+          }
+        }
+      }
+    ]
+  }
+}
