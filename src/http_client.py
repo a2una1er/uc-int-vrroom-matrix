@@ -54,7 +54,17 @@ class HttpClient:
                         msg = f"HTTP {response.status} from {url}"
                         _LOG.error(msg)
                         return HttpError(status_code=response.status, message=msg)
-                    return await response.json(content_type=None)
+                    # Some VRRoom commands (insel, reboot, hotplug) return an
+                    # empty body — only parse JSON if there is content.
+                    text = await response.text()
+                    if not text.strip():
+                        return {}
+                    try:
+                        import json
+                        return json.loads(text)
+                    except json.JSONDecodeError as exc:
+                        _LOG.warning("Non-JSON response from %s: %r", url, text[:200])
+                        return {}
         except aiohttp.ClientError as exc:
             # Req 2.7
             msg = f"Connection error to {url}: {exc}"

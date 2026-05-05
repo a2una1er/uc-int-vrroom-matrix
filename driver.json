@@ -1,12 +1,16 @@
 {
   "driver_id": "uc_vrroom_driver",
   "version": "0.1.0",
-  "min_core_api": "0.20.0",
+  "min_core_api": "0.22.0",
+  "port": 9090,
   "name": {
     "en": "HDFury VRRoom",
     "de": "HDFury VRRoom"
   },
   "icon": "custom:vrroom",
+  "developer": {
+    "name": "Daniel Fischer"
+  },
   "description": {
     "en": "HDFury VRRoom HDMI Matrix Switch integration for Remote Three",
     "de": "HDFury VRRoom HDMI-Matrix-Switch Integration für Remote Three"
@@ -26,6 +30,81 @@
         "field": {
           "text": {
             "value": "vrroom"
+          }
+        }
+      },
+      {
+        "id": "rx0_name",
+        "label": {
+          "en": "Name for RX0 (Input 1)",
+          "de": "Name für RX0 (Eingang 1)"
+        },
+        "field": {
+          "text": {
+            "value": "RX0"
+          }
+        }
+      },
+      {
+        "id": "rx1_name",
+        "label": {
+          "en": "Name for RX1 (Input 2)",
+          "de": "Name für RX1 (Eingang 2)"
+        },
+        "field": {
+          "text": {
+            "value": "RX1"
+          }
+        }
+      },
+      {
+        "id": "rx2_name",
+        "label": {
+          "en": "Name for RX2 (Input 3)",
+          "de": "Name für RX2 (Eingang 3)"
+        },
+        "field": {
+          "text": {
+            "value": "RX2"
+          }
+        }
+      },
+      {
+        "id": "rx3_name",
+        "label": {
+          "en": "Name for RX3 (Input 4)",
+          "de": "Name für RX3 (Eingang 4)"
+        },
+        "field": {
+          "text": {
+            "value": "RX3"
+          }
+        }
+      },
+      {
+        "id": "copy_name",
+        "label": {
+          "en": "Name for Copy mode",
+          "de": "Name für Copy-Mode"
+        },
+        "field": {
+          "text": {
+            "value": "Copy"
+          }
+        }
+      },
+      {
+        "id": "poll_interval_ms",
+        "label": {
+          "en": "Polling interval (ms, 0 = disabled)",
+          "de": "Polling-Intervall (ms, 0 = deaktiviert)"
+        },
+        "field": {
+          "number": {
+            "value": 5000,
+            "min": 0,
+            "max": 60000,
+            "steps": 1000
           }
         }
       }

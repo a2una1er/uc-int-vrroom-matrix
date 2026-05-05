@@ -2,27 +2,32 @@
 
 Python-Integration für den HDFury VRRoom HDMI-Matrix-Switch im Matrix-Mode.
 
+## Features
+
+- **TX0 Input** — Dropdown zur Auswahl des Eingangs für Ausgang TX0
+- **TX1 Input** — Dropdown zur Auswahl des Eingangs für Ausgang TX1
+- **VRRoom Misc** — Reboot und HotPlug-Befehle
+- **Polling** — Automatische Statusaktualisierung (konfigurierbar, default 5s)
+- **Benutzerdefinierte Eingangsnamen** — z.B. "PC", "PS5", "Switch" statt RX0–RX3
+
 ## Voraussetzungen
 
 - Python 3.11 oder neuer
 - HDFury VRRoom im lokalen Netzwerk (Matrix-Mode)
-- Unfolded Circle Remote Three
+- Unfolded Circle Remote Three (Firmware mit Core API ≥ 0.22.0)
 
 ## Installation
 
-### Option 1: Direkt auf der Remote Three
+### Extern auf dem PC (zum Entwickeln/Testen)
 
-1. Abhängigkeiten installieren:
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+pip install -r requirements.txt
+python src/driver.py
+```
 
-2. Driver starten:
-   ```bash
-   python src/driver.py
-   ```
+Der Driver announced sich per mDNS im Netzwerk. Die Remote findet ihn automatisch unter **Settings → Integrations → Add Integration**.
 
-### Option 2: Externer Host (Docker)
+### Docker
 
 ```bash
 docker run -d \
@@ -37,33 +42,39 @@ docker run -d \
 
 ## Konfiguration
 
-Bei der Einrichtung in der Remote Three Web-Oberfläche:
+Beim Einrichten der Integration auf der Remote werden folgende Felder abgefragt:
 
-1. Gehe zu **Settings → Integrations → Add Integration**
-2. Wähle **HDFury VRRoom**
-3. Gib den **Hostname oder die IP-Adresse** des VRRoom ein (Standard: `vrroom`)
+| Feld | Beschreibung | Default |
+|------|-------------|---------|
+| Host | Hostname oder IP des VRRoom | `vrroom` |
+| Name für RX0–RX3 | Anzeigenamen für die Eingänge (z.B. PC, PS5, Switch, Dock) | RX0–RX3 |
+| Name für Copy-Mode | Anzeigename für den Copy-Modus | Copy |
+| Polling-Intervall | Statusabfrage in ms (0 = deaktiviert) | 5000 |
 
-## Unterstützte Befehle
+Die Eingangsnamen erscheinen in den Dropdown-Listen der TX0/TX1 Select-Entities.
 
-| Befehl | Beschreibung |
-|--------|-------------|
-| `SELECT_TX0_RX0` | Eingang RX0 auf Ausgang TX0 |
-| `SELECT_TX0_RX1` | Eingang RX1 auf Ausgang TX0 |
-| `SELECT_TX0_RX2` | Eingang RX2 auf Ausgang TX0 |
-| `SELECT_TX0_RX3` | Eingang RX3 auf Ausgang TX0 |
-| `SELECT_TX0_COPY` | Copy-Mode auf TX0 (spiegelt TX1) |
-| `SELECT_TX1_RX0` | Eingang RX0 auf Ausgang TX1 |
-| `SELECT_TX1_RX1` | Eingang RX1 auf Ausgang TX1 |
-| `SELECT_TX1_RX2` | Eingang RX2 auf Ausgang TX1 |
-| `SELECT_TX1_RX3` | Eingang RX3 auf Ausgang TX1 |
-| `SELECT_TX1_COPY` | Copy-Mode auf TX1 (spiegelt TX0) |
-| `REBOOT` | Gerät neu starten |
-| `HOTPLUG` | HotPlug-Event auslösen ⚠️ Endpunkt noch zu verifizieren |
+## Entities
+
+| Entity | Typ | Beschreibung |
+|--------|-----|-------------|
+| TX0 Input | Select | Dropdown zur Eingangswahl für Ausgang TX0 |
+| TX1 Input | Select | Dropdown zur Eingangswahl für Ausgang TX1 |
+| VRRoom Misc | Remote | Befehle: REBOOT, HOTPLUG |
+
+Die Select-Entities können auf der Startseite und in Activities verwendet werden.
+
+## VRRoom HTTP API
+
+| Endpunkt | Funktion |
+|----------|----------|
+| `GET /ssi/infopage.ssi` | Status abrufen (JSON) |
+| `GET /cmd?insel={tx0}%20{tx1}` | Eingänge umschalten |
+| `GET /cmd?reboot` | Gerät neu starten |
+| `GET /cmd?hotplug=` | HotPlug-Event auslösen |
 
 ## Entwicklung
 
 ```bash
-# Abhängigkeiten installieren
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
 
@@ -78,18 +89,31 @@ pytest tests/ -v --hypothesis-seed=0
 
 ```
 /
-├── src/               # Python-Quellcode
-│   ├── driver.py      # Einstiegspunkt
-│   ├── settings.py    # GlobalSettings
-│   ├── http_client.py # HTTP-Kommunikation
-│   ├── status_parser.py # JSON-Parsing
-│   └── remote_entity.py # ucapi Remote-Entity
-├── tests/             # Testdateien
-├── docs/              # Weitere Dokumentation (VERIFY.md, ...)
-├── driver.json        # Driver-Metadaten
-├── README.md
-├── requirements.txt
-└── requirements-dev.txt
+├── src/
+│   ├── driver.py          # Einstiegspunkt, Event-Handler, Polling
+│   ├── select_entity.py   # TX0/TX1 Select-Entities (Dropdowns)
+│   ├── remote_entity.py   # Misc-Entity (REBOOT, HOTPLUG)
+│   ├── http_client.py     # HTTP GET-Kommunikation mit VRRoom
+│   ├── status_parser.py   # JSON-Parsing der VRRoom-Antwort
+│   └── settings.py        # GlobalSettings (Host, Namen, Polling)
+├── tests/                 # Unit- und Property-Based Tests
+├── docs/                  # VERIFY.md
+├── driver.json            # Driver-Metadaten und Setup-Schema
+├── requirements.txt       # ucapi, aiohttp
+├── requirements-dev.txt   # hypothesis, pytest
+└── .github/workflows/     # GitHub Actions Build & Release
+```
+
+## Build & Release
+
+Ein Git-Tag `v*` löst den GitHub Actions Workflow aus:
+- Baut ein aarch64-Binary mit PyInstaller
+- Erstellt ein `.tar.gz` für die Installation auf der Remote
+- Erstellt einen GitHub Release Draft
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
 ## Lizenz

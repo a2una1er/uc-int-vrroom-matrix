@@ -19,10 +19,10 @@ def valid_status_dict(**overrides) -> dict:
     base = {
         "portseltx0": "0",
         "portseltx1": "1",
-        "rx0in5v": "1",
-        "rx1in5v": "0",
-        "rx2in5v": "1",
-        "rx3in5v": "0",
+        "rx0in5v": "2",
+        "rx1in5v": "1",
+        "rx2in5v": "2",
+        "rx3in5v": "2",
     }
     base.update(overrides)
     return base
@@ -60,10 +60,10 @@ def test_missing_required_fields_parse_error(missing):
     data=st.fixed_dictionaries({
         "portseltx0": st.integers(min_value=0, max_value=4).map(str),
         "portseltx1": st.integers(min_value=0, max_value=4).map(str),
-        "rx0in5v": st.sampled_from(["0", "1"]),
-        "rx1in5v": st.sampled_from(["0", "1"]),
-        "rx2in5v": st.sampled_from(["0", "1"]),
-        "rx3in5v": st.sampled_from(["0", "1"]),
+        "rx0in5v": st.sampled_from(["0", "1", "2"]),
+        "rx1in5v": st.sampled_from(["0", "1", "2"]),
+        "rx2in5v": st.sampled_from(["0", "1", "2"]),
+        "rx3in5v": st.sampled_from(["0", "1", "2"]),
     })
 )
 @h_settings(max_examples=100)
@@ -86,10 +86,6 @@ def test_round_trip_serialization(data):
     data=st.fixed_dictionaries({
         "portseltx0": st.integers(min_value=0, max_value=4).map(str),
         "portseltx1": st.integers(min_value=0, max_value=4).map(str),
-        "rx0in5v": st.sampled_from(["0", "1"]),
-        "rx1in5v": st.sampled_from(["0", "1"]),
-        "rx2in5v": st.sampled_from(["0", "1"]),
-        "rx3in5v": st.sampled_from(["0", "1"]),
     })
 )
 @h_settings(max_examples=100)
@@ -104,7 +100,7 @@ def test_tx_values_are_valid_integers(data):
 
 
 # ---------------------------------------------------------------------------
-# Property 10: ParseError on invalid string values
+# Property 10: ParseError on invalid TX string values
 # Feature: hdfury-vrroom-integration, Property 10: Parse-Fehler bei ungültigem String-Wert
 # Validates: Requirement 8.4
 # ---------------------------------------------------------------------------
@@ -123,38 +119,28 @@ def test_invalid_tx0_string_parse_error(tx0):
     assert isinstance(result, ParseError)
 
 
-@given(rx_val=st.text().filter(lambda s: s not in ("0", "1")))
-@h_settings(max_examples=100)
-def test_invalid_signal_string_parse_error(rx_val):
-    """Invalid string for rx*in5v (not '0' or '1') must return ParseError (Req 8.4)."""
-    data = valid_status_dict(rx0in5v=rx_val)
-    result = StatusParser().parse(data)
-    assert isinstance(result, ParseError)
-
-
 # ---------------------------------------------------------------------------
 # Unit tests
 # ---------------------------------------------------------------------------
 
-def test_parse_valid_status():
-    """Parse a typical VRRoom response correctly."""
+def test_parse_real_device_response():
+    """Parse a real VRRoom response (rx*in5v can be '0', '1', or '2')."""
     data = {
-        "portseltx0": "2",
+        "portseltx0": "0",
         "portseltx1": "1",
-        "rx0in5v": "1",
-        "rx1in5v": "0",
-        "rx2in5v": "1",
-        "rx3in5v": "0",
-        "RX0": "some_value",
-        "TX0": "other_value",
+        "rx0in5v": "2",
+        "rx1in5v": "1",
+        "rx2in5v": "2",
+        "rx3in5v": "2",
+        "RX0": " 4KVRR FRL5 RGB 10b HDR  ",
+        "TX0": " 4KVRR FRL5 RGB 10b HDR  ",
     }
     status = StatusParser().parse(data)
     assert isinstance(status, DeviceStatus)
-    assert status.portseltx0 == 2
+    assert status.portseltx0 == 0
     assert status.portseltx1 == 1
-    assert status.rx0in5v is True
-    assert status.rx1in5v is False
-    assert status.extra == {"RX0": "some_value", "TX0": "other_value"}
+    assert status.extra["rx0in5v"] == "2"
+    assert status.extra["RX0"] == " 4KVRR FRL5 RGB 10b HDR  "
 
 
 def test_parse_copy_mode():
@@ -170,11 +156,9 @@ def test_serialize_round_trip_with_extra():
     data = {
         "portseltx0": "3",
         "portseltx1": "0",
-        "rx0in5v": "0",
+        "rx0in5v": "2",
         "rx1in5v": "1",
-        "rx2in5v": "0",
-        "rx3in5v": "1",
-        "opmode": "matrix",
+        "opmode": "2",
         "RX0": "4k60",
     }
     parser = StatusParser()

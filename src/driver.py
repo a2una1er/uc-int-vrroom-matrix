@@ -1,114 +1,213 @@
 """
 Einstiegspunkt für den HDFury VRRoom Integration Driver.
-
-Initialisiert die ucapi IntegrationAPI, registriert die VRRoomRemoteEntity
-und verwaltet den Verbindungslebenszyklus mit Remote Three.
 """
 import asyncio
 import logging
 import os
 
 import ucapi
-from ucapi import remote
+from ucapi import select
 
 from http_client import HttpClient, HttpError
-from remote_entity import VRRoomRemoteEntity
+from remote_entity import VRRoomMiscEntity
+from select_entity import VRRoomSelectEntity, ENTITY_ID_TX0, ENTITY_ID_TX1
 from settings import GlobalSettings, g
 from status_parser import ParseError, StatusParser
 
 _LOG = logging.getLogger(__name__)
 
-# Path to driver.json relative to this file's location (../driver.json)
 _DRIVER_JSON = os.path.join(os.path.dirname(__file__), "..", "driver.json")
 
-# Module-level references so event handlers can access them
-api = ucapi.IntegrationAPI()
+loop = asyncio.new_event_loop()
+api = ucapi.IntegrationAPI(loop)
+
 _http_client: HttpClient | None = None
-_entity: VRRoomRemoteEntity | None = None
+_tx0_entity: VRRoomSelectEntity | None = None
+_tx1_entity: VRRoomSelectEntity | None = None
+_misc_entity: VRRoomMiscEntity | None = None
+_poll_task: asyncio.Task | None = None
+_connected: bool = False
 
 
 async def _fetch_and_apply_status() -> bool:
-    """
-    Fetch device status from VRRoom and update entity state.
-
-    Returns True on success, False on failure.
-    Req 9.1, 9.2, 9.3, 10.5
-    """
-    if _http_client is None or _entity is None:
-        _LOG.error("Driver not initialized: http_client or entity is None")
+    """Fetch device status and update Select entity current options."""
+    if _http_client is None:
         return False
 
     result = await _http_client.get("ssi/infopage.ssi")
     if isinstance(result, HttpError):
-        # Req 9.3: log error, remain UNAVAILABLE
-        _LOG.error("Startup status fetch failed: %s", result.message)
+        _LOG.error("Status fetch failed: %s", result.message)
         return False
 
     status = StatusParser().parse(result)
     if isinstance(status, ParseError):
-        _LOG.error("Startup status parse failed: %s", status.message)
+        _LOG.error("Status parse failed: %s", status.message)
         return False
 
-    # Update entity state to ON (Req 9.2)
-    _entity.attributes[remote.Attributes.STATE] = remote.States.ON
-    _LOG.info(
-        "Status fetched: tx0=%d, tx1=%d", status.portseltx0, status.portseltx1
-    )
+    changed = False
+
+    if _tx0_entity:
+        new_option = g.input_value_to_option(status.portseltx0)
+        old_option = _tx0_entity.attributes.get(select.Attributes.CURRENT_OPTION)
+        if new_option != old_option:
+            _tx0_entity.update_current_option(status.portseltx0)
+            changed = True
+        api.configured_entities.update_attributes(
+            ENTITY_ID_TX0,
+            {
+                select.Attributes.STATE: select.States.ON,
+                select.Attributes.OPTIONS: g.input_options(),
+                select.Attributes.CURRENT_OPTION: _tx0_entity.attributes[select.Attributes.CURRENT_OPTION],
+            },
+        )
+
+    if _tx1_entity:
+        new_option = g.input_value_to_option(status.portseltx1)
+        old_option = _tx1_entity.attributes.get(select.Attributes.CURRENT_OPTION)
+        if new_option != old_option:
+            _tx1_entity.update_current_option(status.portseltx1)
+            changed = True
+        api.configured_entities.update_attributes(
+            ENTITY_ID_TX1,
+            {
+                select.Attributes.STATE: select.States.ON,
+                select.Attributes.OPTIONS: g.input_options(),
+                select.Attributes.CURRENT_OPTION: _tx1_entity.attributes[select.Attributes.CURRENT_OPTION],
+            },
+        )
+
+    if changed:
+        _LOG.info(
+            "Status updated: tx0=%d (%s), tx1=%d (%s)",
+            status.portseltx0, g.input_value_to_option(status.portseltx0),
+            status.portseltx1, g.input_value_to_option(status.portseltx1),
+        )
+
     return True
+
+
+async def _poll_loop() -> None:
+    """Background polling task. Only runs while connected."""
+    _LOG.info("Polling started (interval: %d ms)", g.poll_interval_ms)
+    while True:
+        await asyncio.sleep(g.poll_interval_ms / 1000.0)
+        if not _connected:
+            continue
+        try:
+            await _fetch_and_apply_status()
+        except Exception as exc:
+            _LOG.error("Polling error: %s", exc)
+
+
+def _start_polling() -> None:
+    """Start the polling task if interval > 0 and not already running."""
+    global _poll_task
+    if _poll_task is not None and not _poll_task.done():
+        return  # already running
+    if g.poll_interval_ms <= 0:
+        _LOG.info("Polling disabled (interval = 0)")
+        return
+    _poll_task = asyncio.ensure_future(_poll_loop(), loop=loop)
+
+
+def _stop_polling() -> None:
+    """Stop the polling task."""
+    global _poll_task
+    if _poll_task is not None and not _poll_task.done():
+        _poll_task.cancel()
+        _poll_task = None
+        _LOG.info("Polling stopped")
 
 
 @api.listens_to(ucapi.Events.CONNECT)
 async def on_connect() -> None:
-    """
-    Handle Remote Three connection event.
-
-    Fetches device status on connection (Req 9.1, 10.5).
-    """
+    global _connected
+    _connected = True
     _LOG.info("Remote Three connected — fetching device status")
+    await api.set_device_state(ucapi.DeviceStates.CONNECTED)
     await _fetch_and_apply_status()
+    _start_polling()
+
+
+@api.listens_to(ucapi.Events.DISCONNECT)
+async def on_disconnect() -> None:
+    global _connected
+    _connected = False
+    _LOG.info("Remote Three disconnected — stopping polling")
+    _stop_polling()
 
 
 async def _setup_handler(msg: ucapi.SetupDriver) -> ucapi.SetupAction:
-    """
-    Handle driver setup flow.
-
-    Extracts host from setup data and stores it in GlobalSettings (Req 1.1).
-    """
     if isinstance(msg, ucapi.DriverSetupRequest):
-        host = msg.setup_data.get("host", "vrroom")
-        if host:
-            g.host = host
-            if _http_client is not None:
-                _http_client._settings.host = host
-            _LOG.info("Setup: host set to '%s'", host)
+        data = msg.setup_data
+
+        # Host
+        host = data.get("host", "vrroom").strip() or "vrroom"
+        g.host = host
+        if _http_client is not None:
+            _http_client._settings.host = host
+
+        # Input names
+        g.rx0_name = data.get("rx0_name", "").strip() or "RX0"
+        g.rx1_name = data.get("rx1_name", "").strip() or "RX1"
+        g.rx2_name = data.get("rx2_name", "").strip() or "RX2"
+        g.rx3_name = data.get("rx3_name", "").strip() or "RX3"
+        g.copy_name = data.get("copy_name", "").strip() or "Copy"
+
+        # Polling interval
+        try:
+            g.poll_interval_ms = int(data.get("poll_interval_ms", 5000))
+        except (ValueError, TypeError):
+            g.poll_interval_ms = 5000
+
+        # Refresh options on entities
+        options = g.input_options()
+        if _tx0_entity:
+            _tx0_entity.update_options()
+            api.configured_entities.update_attributes(
+                ENTITY_ID_TX0, {select.Attributes.OPTIONS: options}
+            )
+        if _tx1_entity:
+            _tx1_entity.update_options()
+            api.configured_entities.update_attributes(
+                ENTITY_ID_TX1, {select.Attributes.OPTIONS: options}
+            )
+
+        # Restart polling with new interval
+        _stop_polling()
+        if _connected:
+            _start_polling()
+
+        _LOG.info(
+            "Setup: host=%s, inputs=%s, poll=%dms", host, options, g.poll_interval_ms
+        )
         return ucapi.SetupComplete()
 
-    _LOG.warning("Unexpected setup message type: %s", type(msg))
+    _LOG.warning("Unexpected setup message: %s", type(msg))
     return ucapi.SetupError()
 
 
 async def main() -> None:
-    """
-    Main entry point for the VRRoom integration driver.
-
-    Initializes all components and starts the ucapi integration API.
-    """
-    global _http_client, _entity
-
-    settings = GlobalSettings()
-    # Keep global g in sync (g is the module-level instance used by HttpClient)
-    g.host = settings.host
+    global _http_client, _tx0_entity, _tx1_entity, _misc_entity
 
     _http_client = HttpClient(g)
-    _entity = VRRoomRemoteEntity(_http_client)
+    _tx0_entity = VRRoomSelectEntity(tx_index=0, settings=g, http_client=_http_client)
+    _tx1_entity = VRRoomSelectEntity(tx_index=1, settings=g, http_client=_http_client)
+    _misc_entity = VRRoomMiscEntity(_http_client)
 
-    # Register entity (Req 10.2, 10.3)
-    api.available_entities.add(_entity)
+    # Set device_id on all entities so they can be added to activities
+    _tx0_entity.device_id = "vrroom"
+    _tx1_entity.device_id = "vrroom"
+    _misc_entity.device_id = "vrroom"
 
-    # Start the integration API WebSocket server (Req 10.3)
+    api.available_entities.add(_tx0_entity)
+    api.available_entities.add(_tx1_entity)
+    api.available_entities.add(_misc_entity)
+
     await api.init(_DRIVER_JSON, setup_handler=_setup_handler)
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(main())
+    loop.run_until_complete(main())
+    loop.run_forever()
