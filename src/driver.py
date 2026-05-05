@@ -186,6 +186,9 @@ async def _setup_handler(msg: ucapi.SetupDriver) -> ucapi.SetupAction:
         if _connected:
             _start_polling()
 
+        # Persist settings
+        g.save()
+
         _LOG.info(
             "Setup: host=%s, inputs=%s, poll=%dms", host, options, g.poll_interval_ms
         )
