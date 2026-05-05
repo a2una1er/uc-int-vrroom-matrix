@@ -24,12 +24,12 @@
       {
         "id": "host",
         "label": {
-          "en": "VRRoom Hostname or IP",
-          "de": "VRRoom Hostname oder IP-Adresse"
+          "en": "VRRoom IP address (e.g. 192.168.1.100)",
+          "de": "VRRoom IP-Adresse (z.B. 192.168.1.100)"
         },
         "field": {
           "text": {
-            "value": "vrroom"
+            "value": "192.168.178.76"
           }
         }
       },
