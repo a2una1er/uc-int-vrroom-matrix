@@ -57,7 +57,7 @@ class VRRoomMiscEntity(Remote):
         return StatusCodes.NOT_IMPLEMENTED
 
     async def _simple_get(self, path: str) -> StatusCodes:
-        _LOG.info("Misc command: GET http://%s/%s", "vrroom", path)
+        _LOG.info("Misc command: GET http://%s/%s", self._http_client._settings.host, path)
         result = await self._http_client.get(path)
         if isinstance(result, HttpError):
             _LOG.error("Command GET /%s failed: %s", path, result.message)

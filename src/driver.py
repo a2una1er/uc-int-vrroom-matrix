@@ -27,22 +27,34 @@ _tx1_entity: VRRoomSelectEntity | None = None
 _misc_entity: VRRoomMiscEntity | None = None
 _poll_task: asyncio.Task | None = None
 _connected: bool = False
+_consecutive_errors: int = 0
+_MAX_ERRORS_BEFORE_BACKOFF = 3
+_MAX_BACKOFF_MULTIPLIER = 6  # max 6x poll interval
 
 
 async def _fetch_and_apply_status() -> bool:
     """Fetch device status and update Select entity current options."""
+    global _consecutive_errors
+
     if _http_client is None:
         return False
 
     result = await _http_client.get("ssi/infopage.ssi")
     if isinstance(result, HttpError):
         _LOG.error("Status fetch failed: %s", result.message)
+        _consecutive_errors += 1
+        _set_entities_unavailable()
         return False
 
     status = StatusParser().parse(result)
     if isinstance(status, ParseError):
         _LOG.error("Status parse failed: %s", status.message)
+        _consecutive_errors += 1
+        _set_entities_unavailable()
         return False
+
+    # Success — reset error counter and mark entities available
+    _consecutive_errors = 0
 
     changed = False
 
@@ -94,11 +106,42 @@ async def _fetch_and_apply_status() -> bool:
     return True
 
 
+def _set_entities_unavailable() -> None:
+    """Mark all entities as UNAVAILABLE when VRRoom is unreachable."""
+    if _tx0_entity:
+        api.configured_entities.update_attributes(
+            ENTITY_ID_TX0,
+            {select.Attributes.STATE: select.States.UNAVAILABLE},
+        )
+    if _tx1_entity:
+        api.configured_entities.update_attributes(
+            ENTITY_ID_TX1,
+            {select.Attributes.STATE: select.States.UNAVAILABLE},
+        )
+    if _misc_entity:
+        from ucapi import remote
+        api.configured_entities.update_attributes(
+            ENTITY_ID_MISC,
+            {remote.Attributes.STATE: remote.States.UNAVAILABLE},
+        )
+
+
 async def _poll_loop() -> None:
-    """Background polling task. Only runs while connected."""
+    """Background polling task with exponential backoff on errors."""
     _LOG.info("Polling started (interval: %d ms)", g.poll_interval_ms)
     while True:
-        await asyncio.sleep(g.poll_interval_ms / 1000.0)
+        # Calculate sleep with backoff
+        if _consecutive_errors >= _MAX_ERRORS_BEFORE_BACKOFF:
+            multiplier = min(
+                2 ** (_consecutive_errors - _MAX_ERRORS_BEFORE_BACKOFF),
+                _MAX_BACKOFF_MULTIPLIER,
+            )
+            sleep_ms = g.poll_interval_ms * multiplier
+            _LOG.debug("Backoff active: sleeping %d ms (errors: %d)", sleep_ms, _consecutive_errors)
+        else:
+            sleep_ms = g.poll_interval_ms
+
+        await asyncio.sleep(sleep_ms / 1000.0)
         if not _connected:
             continue
         try:
@@ -129,8 +172,9 @@ def _stop_polling() -> None:
 
 @api.listens_to(ucapi.Events.CONNECT)
 async def on_connect() -> None:
-    global _connected
+    global _connected, _consecutive_errors
     _connected = True
+    _consecutive_errors = 0
     _LOG.info("Remote Three connected — fetching device status")
     await api.set_device_state(ucapi.DeviceStates.CONNECTED)
     await _fetch_and_apply_status()
@@ -143,6 +187,8 @@ async def on_disconnect() -> None:
     _connected = False
     _LOG.info("Remote Three disconnected — stopping polling")
     _stop_polling()
+    if _http_client:
+        await _http_client.close()
 
 
 async def _setup_handler(msg: ucapi.SetupDriver) -> ucapi.SetupAction:

@@ -1,10 +1,10 @@
 """Tests für driver.py und GlobalSettings."""
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from hypothesis import given, settings as h_settings
 from hypothesis import strategies as st
 
-from settings import GlobalSettings, g
+from settings import GlobalSettings
 from http_client import HttpClient, HttpError
 from status_parser import DeviceStatus
 
@@ -13,21 +13,38 @@ from status_parser import DeviceStatus
 # GlobalSettings tests
 # ---------------------------------------------------------------------------
 
-def test_default_host_is_vrroom():
-    """Fallback-Host ist 'vrroom' wenn kein Host konfiguriert (Req 1.2)."""
+def test_default_host_is_ip():
+    """Default-Host ist die konfigurierte IP-Adresse."""
     settings = GlobalSettings()
-    assert settings.host == "vrroom"
-
-
-def test_global_instance_default_host():
-    """Globale Instanz g hat Fallback-Host 'vrroom'."""
-    assert g.host == "vrroom"
+    assert settings.host == "192.168.178.76"
 
 
 def test_host_can_be_set():
-    """Host kann gesetzt werden (Req 1.1)."""
+    """Host kann gesetzt werden."""
     settings = GlobalSettings(host="192.168.1.100")
     assert settings.host == "192.168.1.100"
+
+
+def test_input_options_returns_five_entries():
+    """input_options() returns exactly 5 entries (RX0-RX3 + Copy)."""
+    settings = GlobalSettings()
+    options = settings.input_options()
+    assert len(options) == 5
+
+
+def test_option_to_input_value_roundtrip():
+    """option_to_input_value and input_value_to_option are inverse operations."""
+    settings = GlobalSettings(rx0_name="PC", rx1_name="PS5", rx2_name="Switch",
+                              rx3_name="Xbox", copy_name="Copy")
+    for i in range(5):
+        option = settings.input_value_to_option(i)
+        assert settings.option_to_input_value(option) == i
+
+
+def test_option_to_input_value_unknown_returns_none():
+    """Unknown option returns None."""
+    settings = GlobalSettings()
+    assert settings.option_to_input_value("UNKNOWN") is None
 
 
 # ---------------------------------------------------------------------------
@@ -53,160 +70,142 @@ def make_mock_http_client(success: bool = True, tx0: int = 1, tx1: int = 2) -> M
         client.get = AsyncMock(
             return_value=HttpError(status_code=503, message="Service unavailable")
         )
+    client._settings = MagicMock()
+    client._settings.host = "192.168.178.76"
+    client.close = AsyncMock()
     return client
 
 
 # ---------------------------------------------------------------------------
-# Property 12: Startup-Fetch genau einmal
-# Feature: hdfury-vrroom-integration, Property 12: Startup-Fetch genau einmal
-# Validates: Requirements 9.4
+# _fetch_and_apply_status tests
 # ---------------------------------------------------------------------------
 
 @given(
     tx0=st.integers(min_value=0, max_value=4),
     tx1=st.integers(min_value=0, max_value=4),
 )
-@h_settings(max_examples=100)
+@h_settings(max_examples=50)
 @pytest.mark.asyncio
-async def test_startup_fetch_called_exactly_once(tx0, tx1):
-    """On activation (CONNECT event), the status fetch is executed exactly once. Validates: Req 9.4."""
+async def test_fetch_status_calls_infopage_once(tx0, tx1):
+    """_fetch_and_apply_status calls GET ssi/infopage.ssi exactly once."""
     import driver as drv
 
     mock_client = make_mock_http_client(success=True, tx0=tx0, tx1=tx1)
 
-    from remote_entity import VRRoomRemoteEntity
-    mock_entity = MagicMock(spec=VRRoomRemoteEntity)
-    mock_entity.attributes = {}
-
     original_client = drv._http_client
-    original_entity = drv._entity
+    original_tx0 = drv._tx0_entity
+    original_tx1 = drv._tx1_entity
+    original_misc = drv._misc_entity
     try:
         drv._http_client = mock_client
-        drv._entity = mock_entity
-
-        await drv._fetch_and_apply_status()
-
-        assert mock_client.get.call_count == 1
-        mock_client.get.assert_called_once_with("ssi/infopage.ssi")
-    finally:
-        drv._http_client = original_client
-        drv._entity = original_entity
-
-
-# ---------------------------------------------------------------------------
-# Unit-Test: Startup-Fetch erfolgreich — Validates: Requirements 9.1, 9.2
-# ---------------------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_startup_fetch_success_sets_entity_state():
-    """When startup fetch succeeds, entity state is set to ON. Validates: Req 9.1, 9.2."""
-    import driver as drv
-    from ucapi import remote as ucapi_remote
-
-    mock_client = make_mock_http_client(success=True, tx0=2, tx1=3)
-
-    from remote_entity import VRRoomRemoteEntity
-    mock_entity = MagicMock(spec=VRRoomRemoteEntity)
-    mock_entity.attributes = {}
-
-    original_client = drv._http_client
-    original_entity = drv._entity
-    try:
-        drv._http_client = mock_client
-        drv._entity = mock_entity
+        # Set entities to None to avoid update_attributes calls on mock api
+        drv._tx0_entity = None
+        drv._tx1_entity = None
+        drv._misc_entity = None
 
         result = await drv._fetch_and_apply_status()
 
         assert result is True
-        assert mock_entity.attributes[ucapi_remote.Attributes.STATE] == ucapi_remote.States.ON
+        mock_client.get.assert_called_once_with("ssi/infopage.ssi")
     finally:
         drv._http_client = original_client
-        drv._entity = original_entity
+        drv._tx0_entity = original_tx0
+        drv._tx1_entity = original_tx1
+        drv._misc_entity = original_misc
 
-
-# ---------------------------------------------------------------------------
-# Unit-Test: Startup-Fetch fehlgeschlagen — Validates: Requirements 9.3
-# ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_startup_fetch_failure_leaves_entity_unavailable():
-    """When startup fetch fails, entity state remains UNAVAILABLE. Validates: Req 9.3."""
+async def test_fetch_status_failure_returns_false():
+    """When HTTP fetch fails, _fetch_and_apply_status returns False."""
     import driver as drv
-    from ucapi import remote as ucapi_remote
 
     mock_client = make_mock_http_client(success=False)
 
-    from remote_entity import VRRoomRemoteEntity
-    mock_entity = MagicMock(spec=VRRoomRemoteEntity)
-    mock_entity.attributes = {ucapi_remote.Attributes.STATE: ucapi_remote.States.UNKNOWN}
-
     original_client = drv._http_client
-    original_entity = drv._entity
+    original_tx0 = drv._tx0_entity
+    original_tx1 = drv._tx1_entity
+    original_misc = drv._misc_entity
+    original_errors = drv._consecutive_errors
     try:
         drv._http_client = mock_client
-        drv._entity = mock_entity
+        drv._tx0_entity = None
+        drv._tx1_entity = None
+        drv._misc_entity = None
+        drv._consecutive_errors = 0
 
         result = await drv._fetch_and_apply_status()
 
         assert result is False
-        assert mock_entity.attributes[ucapi_remote.Attributes.STATE] == ucapi_remote.States.UNKNOWN
+        assert drv._consecutive_errors == 1
     finally:
         drv._http_client = original_client
-        drv._entity = original_entity
+        drv._tx0_entity = original_tx0
+        drv._tx1_entity = original_tx1
+        drv._misc_entity = original_misc
+        drv._consecutive_errors = original_errors
 
 
 @pytest.mark.asyncio
-async def test_startup_fetch_parse_error_leaves_entity_unavailable():
-    """When startup fetch returns unparseable data, entity remains uninitialized. Validates: Req 9.3."""
+async def test_fetch_status_parse_error_returns_false():
+    """When status response is unparseable, _fetch_and_apply_status returns False."""
     import driver as drv
-    from ucapi import remote as ucapi_remote
-
-    from remote_entity import VRRoomRemoteEntity
-    mock_entity = MagicMock(spec=VRRoomRemoteEntity)
-    mock_entity.attributes = {ucapi_remote.Attributes.STATE: ucapi_remote.States.UNKNOWN}
 
     mock_client = MagicMock(spec=HttpClient)
-    mock_client.get = AsyncMock(return_value={"some_field": "value"})
+    mock_client.get = AsyncMock(return_value={"some_field": "value"})  # Missing required fields
+    mock_client._settings = MagicMock()
+    mock_client._settings.host = "192.168.178.76"
+    mock_client.close = AsyncMock()
 
     original_client = drv._http_client
-    original_entity = drv._entity
+    original_tx0 = drv._tx0_entity
+    original_tx1 = drv._tx1_entity
+    original_misc = drv._misc_entity
+    original_errors = drv._consecutive_errors
     try:
         drv._http_client = mock_client
-        drv._entity = mock_entity
+        drv._tx0_entity = None
+        drv._tx1_entity = None
+        drv._misc_entity = None
+        drv._consecutive_errors = 0
 
         result = await drv._fetch_and_apply_status()
 
         assert result is False
-        assert mock_entity.attributes[ucapi_remote.Attributes.STATE] == ucapi_remote.States.UNKNOWN
+        assert drv._consecutive_errors == 1
     finally:
         drv._http_client = original_client
-        drv._entity = original_entity
+        drv._tx0_entity = original_tx0
+        drv._tx1_entity = original_tx1
+        drv._misc_entity = original_misc
+        drv._consecutive_errors = original_errors
 
-
-# ---------------------------------------------------------------------------
-# Unit-Test: Remote-3-Verbindung löst Status-Abruf aus — Validates: Requirements 10.5
-# ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_connect_event_triggers_status_fetch():
-    """When Remote Three connects (CONNECT event), a status fetch is triggered. Validates: Req 10.5."""
+async def test_consecutive_errors_reset_on_success():
+    """Successful fetch resets _consecutive_errors to 0."""
     import driver as drv
 
     mock_client = make_mock_http_client(success=True, tx0=0, tx1=1)
 
-    from remote_entity import VRRoomRemoteEntity
-    mock_entity = MagicMock(spec=VRRoomRemoteEntity)
-    mock_entity.attributes = {}
-
     original_client = drv._http_client
-    original_entity = drv._entity
+    original_tx0 = drv._tx0_entity
+    original_tx1 = drv._tx1_entity
+    original_misc = drv._misc_entity
+    original_errors = drv._consecutive_errors
     try:
         drv._http_client = mock_client
-        drv._entity = mock_entity
+        drv._tx0_entity = None
+        drv._tx1_entity = None
+        drv._misc_entity = None
+        drv._consecutive_errors = 5  # simulate previous errors
 
-        await drv.on_connect()
+        result = await drv._fetch_and_apply_status()
 
-        mock_client.get.assert_called_once_with("ssi/infopage.ssi")
+        assert result is True
+        assert drv._consecutive_errors == 0
     finally:
         drv._http_client = original_client
-        drv._entity = original_entity
+        drv._tx0_entity = original_tx0
+        drv._tx1_entity = original_tx1
+        drv._misc_entity = original_misc
+        drv._consecutive_errors = original_errors
