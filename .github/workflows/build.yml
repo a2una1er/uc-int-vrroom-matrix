@@ -45,6 +45,7 @@ jobs:
               python -m pip install -r requirements.txt && \
               pyinstaller --clean --onedir --name intg-vrroom \
                 --collect-all zeroconf \
+                --paths src \
                 --add-data 'driver.json:.' \
                 src/driver.py"
 
