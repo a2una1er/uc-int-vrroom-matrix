@@ -9,7 +9,7 @@ import ucapi
 from ucapi import select
 
 from http_client import HttpClient, HttpError
-from remote_entity import VRRoomMiscEntity
+from remote_entity import VRRoomMiscEntity, ENTITY_ID as ENTITY_ID_MISC
 from select_entity import VRRoomSelectEntity, ENTITY_ID_TX0, ENTITY_ID_TX1
 from settings import GlobalSettings, g
 from status_parser import ParseError, StatusParser
@@ -81,6 +81,14 @@ async def _fetch_and_apply_status() -> bool:
             "Status updated: tx0=%d (%s), tx1=%d (%s)",
             status.portseltx0, g.input_value_to_option(status.portseltx0),
             status.portseltx1, g.input_value_to_option(status.portseltx1),
+        )
+
+    # Keep misc entity state in sync
+    if _misc_entity:
+        from ucapi import remote
+        api.configured_entities.update_attributes(
+            ENTITY_ID_MISC,
+            {remote.Attributes.STATE: remote.States.ON},
         )
 
     return True
