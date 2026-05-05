@@ -1,6 +1,6 @@
 {
   "driver_id": "uc_vrroom_driver",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "min_core_api": "0.22.0",
   "port": 9090,
   "name": {
