@@ -1,13 +1,13 @@
 {
   "driver_id": "uc_vrroom_driver",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "min_core_api": "0.22.0",
   "port": 9090,
   "name": {
     "en": "HDFury VRRoom",
     "de": "HDFury VRRoom"
   },
-  "icon": "custom:vrroom",
+  "icon": "custom:vrroom.png",
   "developer": {
     "name": "Daniel Fischer"
   },

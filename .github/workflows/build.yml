@@ -57,6 +57,8 @@ jobs:
           mv artifacts/bin/intg-vrroom artifacts/bin/driver
           # driver.json goes in the root of the archive
           cp driver.json artifacts/
+          # Include custom icon in archive root
+          cp assets/vrroom.png artifacts/
           echo "ARTIFACT_NAME=uc-intg-vrroom-${{ env.VERSION }}-aarch64" >> $GITHUB_ENV
 
       - name: Create tar.gz archive
